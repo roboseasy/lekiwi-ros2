@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lekiwi_lerobot</name>
+  <version>0.0.1</version>
+  <description>lerobot 보정 · 단위로 LeKiwi 팔로워 팔을 움직이는 ROS 노드 (리더 목표 → 램프 · 이동 제한 → 드라이버 tick 명령)</description>
+  <maintainer email="khw11044@gmail.com">khw</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <!-- lerobot 0.6.0은 rosdep 키가 없다: 따로 만든 python 환경에서 쓴다 (README) -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>lekiwi_msgs</exec_depend>
+  <!-- 바퀴 → 몸체 속도 (lerobot _wheel_raw_to_body와 같은 numpy 계산) -->
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

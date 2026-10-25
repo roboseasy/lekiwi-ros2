@@ -1,0 +1,40 @@
+lekiwi_lidar_node:
+  ros__parameters:
+    # YDLIDAR Tmini Plus 연결 (LeKiwi 표준: Pi USB, CP2102 USB-UART)
+    # launch 인자 port가 이 값을 덮어쓴다. 고정 경로를 쓰려면
+    # /dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0
+    port: /dev/ttyUSB0
+    baudrate: 230400
+    frame_id: lidar_link
+
+    # Tmini Plus 고정값 (lekiwi_sensors/param/ydlidar.yaml과 같다. 바꾸지 않는다)
+    lidar_type: 1               # 1 = TYPE_TRIANGLE
+    device_type: 0              # 0 = YDLIDAR_TYPE_SERIAL
+    isSingleChannel: false
+    support_motor_dtr: false
+    sample_rate: 4              # [K 샘플/s]
+    intensity: true
+    intensity_bit: 8
+    abnormal_check_count: 4     # 시작할 때 정상 데이터를 확인하는 최대 시도 횟수
+    auto_reconnect: true        # USB 통신이 끊기면 SDK가 다시 연결을 시도한다
+
+    # 스캔 범위
+    frequency: 10.0             # [Hz] 회전 속도
+    angle_min: -180.0           # [deg]
+    angle_max: 180.0            # [deg]
+    range_min: 0.05             # [m]
+    range_max: 12.0             # [m]
+    fixed_resolution: true      # 회전마다 같은 개수의 배열로 낸다
+
+    # 방향. reversion은 180도 회전, inverted는 SDK 스캔 각도 부호 반전이다.
+    # 2026-09-22 하부 역장착(lidar_link roll=π) 상태에서 정지 방향을 확인한 조합이다. 장비별 검증이 필요하다.
+    reversion: false
+    inverted: true
+
+    # 출력 (launch 인자 scan_topic이 이 값을 덮어쓴다)
+    scan_topic: lekiwi/sensor/scan
+    # 측정점이 없는 칸의 값. false면 0.0(range_min보다 작아 무효로 취급), true면 +inf
+    invalid_range_is_inf: false
+    # true면 time_increment를 0으로 낸다 (lekiwi_sensors scan_timing_normalizer의 /scan과 같음).
+    # inverted 뒤 배열 순서와 실제 측정 순서가 맞는지 검증하기 전에는 끄지 않는다.
+    zero_time_increment: true

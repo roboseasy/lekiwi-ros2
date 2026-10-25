@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lekiwi_cartographer</name>
+  <version>0.1.0</version>
+  <description>LeKiwi PC에서 Pi의 필터된 라이다 스캔 · IMU · odom으로 Cartographer 2D 지도를 만들고 저장하는 launch · 설정 패키지</description>
+  <maintainer email="khw11044@gmail.com">khw</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- PC에서만 실행한다. Pi에는 Cartographer를 설치하지 않아도 된다 (README 참고) -->
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>cartographer_ros</exec_depend>
+  <exec_depend>cartographer_ros_msgs</exec_depend>
+  <exec_depend>lekiwi_description</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>python3</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>python3-yaml</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,63 @@
+lekiwi_base_controller_node:
+  ros__parameters:
+    # 기구학. 값 근거: LeKiwi 저장소 docs/hardware/slam_navigation.md
+    # kinematics_frame_*: 원래 모터 기구학 원점을 base_footprint에서 본 자세
+    # (lekiwi_description/config/base_frame.yaml과 같은 값으로 유지한다)
+    wheel_radius: 0.05
+    base_radius: 0.13647
+    kinematics_frame_x: 0.007587843843
+    kinematics_frame_y: -0.010776931094
+    kinematics_frame_yaw: 2.094379865161
+
+    # 속도 제한. 2026-10-22 사용자 요청은 0.3 m/s · 90°/s (텔레오퍼레이션)였지만, 바퀴 상한
+    # max_wheel_speed [rad/s] = 드라이버 speed_tick_limit 3000 (= 3000 / 651.8986…, STS3215 · LeRobot 상한)에서
+    # 축 하나만 최대로 줘도 바퀴 상한 안에 드는 가장 큰 값으로 둔다 (ValidateBaseControllerParameters):
+    # 직선 ≤ 4.6019 × 0.05 = 0.2301 m/s, 회전 ≤ 4.6019 × 0.05 / (0.13647 + 0.0132) = 1.5376 rad/s.
+    # 이 안의 명령은 줄지 않고 그대로 실행된다 (데이터셋의 action = 실제 움직임). 섞인 명령이 넘으면
+    # ScaleToWheelEnvelope가 세 바퀴를 같은 비율로 줄인다 (방향 유지)
+    max_linear_x: 0.23
+    max_linear_y: 0.23
+    max_linear_speed: 0.23
+    max_angular_z: 1.53             # 약 88°/s
+    max_wheel_speed: 4.601942363656923
+
+    # 오도메트리 · TF
+    odom_frame: odom
+    base_frame: base_footprint
+    cmd_vel_timeout: 0.3            # [s] 넘게 cmd_vel이 끊기면 바퀴 명령 0
+    tf_time_offset: 0.0
+    odom_source: encoder            # encoder | command
+    encoder_read_period: 0.1        # [s] 엔코더 샘플 주기
+    encoder_sample_timeout: 0.5     # [s] 넘게 샘플이 없으면 속도 0 → 토크 끔 → 고장 고정
+
+    # 모터 백엔드: driver + enable_motor_write: true 일 때만 실제 바퀴를 움직인다
+    motor_backend: driver
+    enable_motor_write: true
+    # 모델 관절 left, back, right 순서의 모터 ID. 실물 위치는 뒤 · 오른쪽 · 왼쪽이다
+    wheel_ids: [8, 9, 7]
+    wheel_directions: [1.0, 1.0, 1.0]
+    torque_enable: false            # 항상 false. 토크는 lekiwi/motor/power 서비스로만 켠다
+
+    # 엔코더 피드백
+    encoder_feedback_source: position   # position | speed
+    # Feetech 위치 감김 주기. 실측 odom 보정에는 encoder_odom_scale을 쓴다
+    encoder_position_ticks_per_revolution: 4096.0
+    encoder_odom_scale: 1.0
+    encoder_position_tick_deadband: 0   # position 피드백에서는 0이어야 한다
+    encoder_speed_deadband: 0.07669903939428206   # [rad/s] speed 피드백 불감대 (tick 50)
+    log_encoder_reads: false
+
+    # 모터 드라이버 연결
+    driver_states_timeout: 0.5      # [s] states · 바퀴 online이 이보다 오래되면 연결 끊김
+    torque_service_timeout: 1.0     # [s] 토크 서비스 응답 대기 시간
+
+    # 토픽 · 서비스 (src/docs/interfaces.md)
+    cmd_vel_topic: cmd_vel
+    odom_topic: odom
+    wheel_joint_states_topic: lekiwi/motor/wheel_joint_states
+    motor_ready_topic: lekiwi/motor/ready
+    motor_power_service: lekiwi/motor/power
+    reset_odometry_service: lekiwi/motor/reset_odometry
+    states_topic: lekiwi/motor/states
+    wheel_command_topic: lekiwi/motor/wheel_command
+    wheel_torque_service: lekiwi/motor/wheel_torque

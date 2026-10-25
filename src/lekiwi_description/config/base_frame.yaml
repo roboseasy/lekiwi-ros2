@@ -1,0 +1,9 @@
+# 옛 모터 기구학 원점의 자세를 현재 base_link 기준으로 나타낸 값.
+# 바퀴 세 개의 옛 · 새 장착 위치를 강체 정합해 구했다 (docs/FRAME_MIGRATION.md).
+# lekiwi_bringup이 이 파일을 베이스 컨트롤러에 마지막으로 넣으므로 이 값이 기준이다.
+# URDF는 이 파일을 읽지 않는다. URDF 바퀴 위치와 맞는지는 test/test_default_model.py가 확인한다.
+lekiwi_base_controller_node:
+  ros__parameters:
+    kinematics_frame_x: 0.007587843843
+    kinematics_frame_y: -0.010776931094
+    kinematics_frame_yaw: 2.094379865161

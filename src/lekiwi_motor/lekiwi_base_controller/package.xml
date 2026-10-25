@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lekiwi_base_controller</name>
+  <version>0.1.0</version>
+  <description>LeKiwi 옴니 휠 베이스 컨트롤러: cmd_vel을 바퀴 속도로 바꿔 lekiwi_motor_driver에 보내고, 바퀴 엔코더로 odom을 만들며, 엔코더 끊김 시 속도 0 · 토크 끔 · 고장 고정을 하는 모터 안전 상태기계 노드</description>
+  <maintainer email="khw11044@gmail.com">khw</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>lekiwi_msgs</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

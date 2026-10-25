@@ -1,0 +1,18 @@
+lekiwi_scan_filter_node:
+  ros__parameters:
+    # 토픽 (docs/interfaces.md). 입력과 출력은 달라야 한다.
+    input_topic: lekiwi/sensor/scan
+    output_topic: lekiwi/sensor/scan_filtered
+    # 바퀴 구간의 기준 축
+    base_frame: base_footprint
+
+    # [m] 라이다 원점 기준 자기 반사 거리. 조립한 장비마다 바퀴 반사와 가까운 장애물로 확인한다.
+    # Nav2의 AMCL laser_min_range · costmap obstacle/raytrace_min_range와 같은 값으로 둔다.
+    self_radius: 0.19
+    # 세기 하한. 장비마다 세기 범위를 확인하기 전에는 0(검사 안 함)으로 둔다.
+    min_intensity: 0.0
+
+    # 바퀴 가림 구간 "중심:폭" [deg], base_frame 축 기준. 참고 로봇에서 본 바퀴 방향이다.
+    # 구간 전체를 지우면 먼 반사도 사라지므로 기본으로 켜지 않는다. 켜면 TF(lidar → base)가 필요하다.
+    mask_wheels: false
+    wheel_sectors: ['179.5:38.5', '61.0:35.5', '-59.3:34.0']

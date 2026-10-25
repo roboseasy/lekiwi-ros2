@@ -1,0 +1,63 @@
+lekiwi_motor_driver_node:
+  ros__parameters:
+    # Feetech 버스 연결 (LeKiwi 표준: Pi USB, 버스 서보 어댑터 1a86 → /dev/ttyACM0)
+    # launch 인자 port가 이 값을 덮어쓴다.
+    port: /dev/ttyACM0
+    baud_rate: 1000000
+    read_timeout_ms: 10             # 모터 한 개의 응답을 기다리는 최대 시간
+
+    # 버스의 모터. ID와 이름은 같은 순서로 쓴다. LeRobot LeKiwi 설정(lekiwi.py)과 같다.
+    # 바퀴 이름은 LeRobot 기준이다. LeKiwi 저장소 새 좌표계의 모델 바퀴(left, back, right)는
+    # 모터 ID [8, 9, 7]에 대응한다 (lekiwi_node/param/base_controller.yaml).
+    motor_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    motor_names:
+      - arm_shoulder_pan
+      - arm_shoulder_lift
+      - arm_elbow_flex
+      - arm_wrist_flex
+      - arm_wrist_roll
+      - arm_gripper
+      - base_left_wheel
+      - base_back_wheel
+      - base_right_wheel
+
+    # 주기 · 장애 처리
+    # 위치 · 속도 · 부하 · 전압 · 온도 · 전류 · 상태. lerobot LeKiwi 데이터셋(30 fps)과 같은 주기
+    publish_rate_hz: 30.0
+    # [s] 모터마다 운전 모드 · 토크 상태 갱신, 응답 없는 모터 재시도. 모터 수로 나눠 한 주기에 한 모터씩
+    slow_read_period: 1.0
+    # 연속 실패가 이만큼 쌓이면 응답 없음으로 본다 (바퀴는 토크 끔). 30 Hz에서 5번 약 167 ms (20 Hz 3번 150 ms와 같은 시간).
+    # 그 뒤 0.3 s는 주기마다, 그다음은 느린 읽기 차례(1초에 한 번)에만 다시 시도한다
+    offline_after_failures: 5
+
+    # 출력
+    states_topic: lekiwi/motor/states
+
+    # 바퀴 쓰기. false면 읽기 전용(쓰기 토픽 · 서비스를 만들지 않는다).
+    # lekiwi_bringup이 베이스 컨트롤러와 함께 켤 때 true로 덮어쓴다. 팔에는 쓰지 않는다 (팔은 아래 arm_*).
+    wheel_write_enabled: false
+    wheel_ids: [7, 8, 9]            # 쓰기를 허용하는 모터. motor_ids 안에 있어야 한다
+    speed_tick_scale: 651.8986469044033   # [tick/s per rad/s] = 4096 / 2π
+    # [tick/s] Goal_Speed 크기 상한 (약 4.60 rad/s). STS3215 · LeRobot 상한(max_raw 3000)과 같다.
+    # 2026-10-22: 사용자 요청 0.3 m/s · 90°/s를 위해 올렸다. 베이스 컨트롤러는 이 상한에 맞춰 0.23 m/s · 1.53 rad/s(88°/s)까지 쓴다.
+    # 베이스 컨트롤러 max_wheel_speed(= 3000 / speed_tick_scale)와 짝으로 맞춘다.
+    speed_tick_limit: 3000
+    wheel_command_timeout: 0.5      # [s] 바퀴 명령이 끊기면 속도 0
+    wheel_torque_off_timeout: 3.0   # [s] 바퀴 명령이 끊기면 토크 끔
+    wheel_command_topic: lekiwi/motor/wheel_command
+    wheel_torque_service: lekiwi/motor/wheel_torque
+
+    # 팔 쓰기. false면 팔은 읽기만 한다(쓰기 토픽 · 서비스를 만들지 않는다).
+    # lekiwi_bringup이 use_arm:=true(기본)일 때 true로 덮어쓴다. 시작할 때 팔 토크는 건드리지 않는다.
+    # 명령은 arm_torque_service로 토크를 켠 뒤에만 쓰고, 끊겨도 모터는 마지막 목표를 유지한다.
+    # arm_* 값은 arm_write_enabled: true일 때만 읽고 검증한다.
+    arm_write_enabled: false
+    arm_ids: [1, 2, 3, 4, 5, 6]     # 쓰기를 허용하는 팔 모터. motor_ids 안에 있고 wheel_ids와 겹치지 않아야 한다
+    # [tick] 목표는 그 모터의 마지막 Present_Position ± 이 값 안으로 자른다 (1024 = 90°).
+    # 깨진 값 · 잘못된 발행자가 한 명령으로 팔을 반 바퀴 넘게 돌리지 못하게 한다. 팔로워는 따라가는 중 목표를 그대로 보내므로
+    # 빠른 리더(약 435°/s)를 서보가 뒤따라오는 차이(약 90°)보다 작으면 원격 조작이 느려진다 (2026-10-22 lekiwi04, 예전 200)
+    arm_max_goal_offset_ticks: 1024
+    arm_command_topic: lekiwi/motor/arm_command       # lekiwi_msgs/ArmCommand, Goal_Position [tick]
+    arm_torque_service: lekiwi/motor/arm_torque       # std_srvs/SetBool, 팔 ID에만 Torque_Enable
+    arm_ready_topic: lekiwi/motor/arm_ready           # std_msgs/Bool, 팔 명령을 받는 중 (transient_local)
+    arm_registers_topic: lekiwi/motor/arm_registers   # lekiwi_msgs/ArmRegisters, EEPROM 값 (transient_local)

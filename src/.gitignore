@@ -1,0 +1,29 @@
+# ROS2 빌드 산출물
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# C++
+*.o
+*.so
+*.a
+
+# 데이터 / 로그
+*.bag
+rosbag2_*/
+*.csv
+
+# IDE / 개인 설정
+.vscode/
+.idea/
+*.swp
+
+# 비밀정보
+.env
+*.pem
+*_token*

@@ -1,0 +1,37 @@
+lekiwi_follower_arm_node:
+  ros__parameters:
+    # 보정 파일: <calibration_dir>/<robot_id>.json (lerobot이 만든 것)
+    # robot_id는 비우면 호스트 이름이다 (lekiwi04 → lekiwi04.json). launch 인자 robot_id를 주면 그것이 이긴다.
+    # 숫자처럼 보이는 이름은 따옴표로 쓴다 ('04')
+    robot_id: ''
+    calibration_dir: ~/.cache/huggingface/lerobot/calibration/robots/lekiwi
+
+    # 주기 · 안전 (실수로 쓴다: 30이 아니라 30.0)
+    rate_hz: 30.0                 # 명령 · 상태 주기
+    ramp_threshold_deg: 8.0       # [deg] 시작할 때 이보다 차이가 큰 관절이 있으면 램프
+    ramp_time_s: 2.0              # [s] 램프 시간
+    max_step_deg: 10.0            # [deg] 램프 · 접은 자세 · 멈춘 뒤 첫 명령: 잰 자세에서 한 번 최대 이동. 그리퍼는 같은 모터 각도
+    # [deg] 따라가는 중: 지난 명령에서 한 번 최대 이동 (튐 막기만). 목표는 그대로 보낸다 (lerobot max_relative_target None)
+    follow_step_deg: 45.0
+    goal_timeout_s: 0.5           # [s] 목표가 끊기면 명령을 그친다 (드라이버가 자세를 유지)
+    track_tolerance_deg: 4.0      # [deg] 명령과 이만큼 넘게 떨어진 몸 관절이 (max_step_deg보다 작게)
+    track_timeout_s: 0.3          # [s] 이 시간 동안 그만큼도 움직이지 않으면 경고한다 (명령은 그대로)
+    state_timeout_s: 0.5          # [s] 모터 상태가 끊기거나 팔 모터가 이만큼 응답하지 않으면 오류
+
+    # 접은 자세 (lekiwi/arm/rest). 실물 tick, 모터 ID 1~6 순서. 보정으로 LeRobot 단위로 바꾸고 보정 범위로 자른다.
+    # 로봇마다 다르므로 여기서는 비워 두고([] = 없음, 요청을 거절한다) 그 로봇의 ~/lekiwi_ws/robot_profile.yaml에 둔다 (README)
+    # 뒤에 얹는 파일에서 지울 때는 '' 를 쓴다: rcl은 뒤 파일의 빈 목록 []을 무시해 앞 파일의 값이 남는다
+    rest_pose_ticks: []
+    rest_time_s: 3.0              # [s] 잰 자세 → 접은 자세 램프 (smoothstep)
+    rest_tolerance_deg: 3.0       # [deg] 모든 관절이 이 안이면 rested. max_step_deg보다 작게
+
+    # 토픽
+    motor_states_topic: lekiwi/motor/states
+    arm_ready_topic: lekiwi/motor/arm_ready
+    arm_registers_topic: lekiwi/motor/arm_registers
+    goal_topic: lekiwi/arm/goal
+    state_topic: lekiwi/arm/state
+    command_topic: lekiwi/motor/arm_command
+    status_topic: lekiwi/arm/status
+    lerobot_state_topic: lekiwi/lerobot/state   # lerobot LeKiwi observation.state 9개 (데이터셋 기록)
+    rest_service: lekiwi/arm/rest                 # std_srvs/Trigger, 접은 자세로 돌아가기

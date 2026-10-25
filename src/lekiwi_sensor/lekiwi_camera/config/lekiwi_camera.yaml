@@ -1,0 +1,36 @@
+# 노드 이름별 설정. launch가 front_camera_node, wrist_camera_node 두 개를 띄운다.
+#
+# 장치 경로: 두 카메라의 시리얼 번호가 같아 /dev/v4l/by-id 링크가 하나만 생기므로
+# Pi USB 포트 위치로 정해지는 /dev/v4l/by-path 링크를 쓴다. 카메라를 다른 USB 포트에 꽂으면 바뀐다.
+#   ls -l /dev/v4l/by-path/   # ...-video-index0 만 영상 장치다 (index1은 메타데이터)
+#
+# rotation: 시계 방향 0, 90, 180, 270. 0이 아니면 Pi에서 JPEG를 풀고 돌려 다시 압축하므로 CPU를 더 쓴다.
+#   LeRobot LeKiwi 기본값은 전방 180, 손목 90이다. 영상을 보고 맞춘다.
+
+front_camera_node:
+  ros__parameters:
+    # 전방 카메라: Pi USB 포트 1.2 → /dev/video0 (LeRobot 설정의 front와 같은 장치)
+    device: "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2:1.0-video-index0"
+    width: 640
+    height: 480
+    fps: 30
+    rotation: 0
+    jpeg_quality: 80            # rotation을 쓸 때 다시 압축하는 품질
+    frame_id: front_camera_optical_frame
+    topic_prefix: lekiwi/sensor/front_camera
+    frame_timeout_ms: 1000      # 이 시간 안에 프레임이 없으면 실패로 센다
+    reopen_after_failures: 3    # 연속 실패가 이만큼 쌓일 때마다 장치를 다시 연다
+
+wrist_camera_node:
+  ros__parameters:
+    # 손목 카메라: Pi USB 포트 1.1 → /dev/video2 (LeRobot 설정의 wrist와 같은 장치)
+    device: "/dev/v4l/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-video-index0"
+    width: 640
+    height: 480
+    fps: 30
+    rotation: 0
+    jpeg_quality: 80
+    frame_id: wrist_camera_optical_frame
+    topic_prefix: lekiwi/sensor/wrist_camera
+    frame_timeout_ms: 1000
+    reopen_after_failures: 3

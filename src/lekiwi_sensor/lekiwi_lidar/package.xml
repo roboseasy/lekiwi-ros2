@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lekiwi_lidar</name>
+  <version>0.1.0</version>
+  <description>LeKiwi Raspberry Pi의 USB에 연결된 YDLIDAR Tmini Plus를 YDLidar SDK로 직접 읽어 sensor_msgs/LaserScan으로 퍼블리시하는 노드</description>
+  <maintainer email="khw11044@gmail.com">khw</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- YDLidar SDK(ydlidar_sdk)는 rosdep 키가 없어 /usr/local에 직접 설치한다. README 참고 -->
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
