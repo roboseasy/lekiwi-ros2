@@ -22,6 +22,7 @@ rosbag2_*/
 .vscode/
 .idea/
 *.swp
+.omc
 
 # 비밀정보
 .env

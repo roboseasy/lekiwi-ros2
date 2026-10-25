@@ -37,6 +37,7 @@ htmlcov/
 *.db3
 *.mcap
 *.pbstream
+.omc
 
 # Local tool diagnostics
 /error.log
