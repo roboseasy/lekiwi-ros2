@@ -80,6 +80,8 @@ BASE_PARAMETERS: Final[tuple[str, ...]] = (
 	'wheel_radius', 'base_radius', 'kinematics_frame_x', 'kinematics_frame_y',
 	'kinematics_frame_yaw', 'wheel_ids', 'wheel_directions')
 STATUS_PERIOD_S: Final[float] = 1.0
+# [s] 베이스 파라미터 요청에 이만큼 답이 없으면 (그사이 컨트롤러가 사라짐 등) 버리고 다시 묻는다
+BASE_REQUEST_TIMEOUT_S: Final[float] = 3.0
 # 드라이버 arm_ready · 베이스 컨트롤러 ready 와 같은 QoS: 늦게 붙어도 마지막 값을 받는다
 LATCHED_QOS: Final[QoSProfile] = QoSProfile(
 	depth=1,
@@ -119,7 +121,7 @@ class ZmqHostNode(Node):
 		self._estop_latched: bool | None = None
 		self._base: BaseKinematics | None = None
 		self._base_reason = f'베이스 컨트롤러({BASE_CONTROLLER_NODE}) 파라미터를 아직 읽지 못했습니다'
-		self._is_base_request_pending = False
+		self._base_requested_at: float | None = None   # 답을 기다리는 요청을 보낸 때 (time.monotonic)
 		self._client_count = 0
 		self._is_peer_warned = False
 		self._last_problem: str | None = None
@@ -377,18 +379,23 @@ class ZmqHostNode(Node):
 		names = {name for name, _namespace in self.get_node_names_and_namespaces()}
 		if BASE_CONTROLLER_NODE not in names:
 			self._base = None
+			self._base_requested_at = None   # 사라진 컨트롤러에 보낸 요청은 답이 오지 않을 수 있다
 			self._base_reason = f'베이스 컨트롤러({BASE_CONTROLLER_NODE})가 없습니다'
 			return
-		if self._base is not None or self._is_base_request_pending:
+		now = time.monotonic()
+		is_pending = (
+			self._base_requested_at is not None
+			and now - self._base_requested_at < BASE_REQUEST_TIMEOUT_S)
+		if self._base is not None or is_pending:
 			return
 		if not self._parameter_client.services_are_ready():
 			return
-		self._is_base_request_pending = True
+		self._base_requested_at = now
 		self._parameter_client.get_parameters(
 			list(BASE_PARAMETERS), callback=self._base_parameters_callback)
 
 	def _base_parameters_callback(self, future: Any) -> None:
-		self._is_base_request_pending = False
+		self._base_requested_at = None
 		response = future.result() if future.exception() is None else None
 		if response is None or len(response.values) != len(BASE_PARAMETERS):
 			self._base_reason = '베이스 컨트롤러 파라미터를 읽지 못했습니다'
