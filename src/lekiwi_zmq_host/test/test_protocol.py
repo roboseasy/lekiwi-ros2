@@ -2,6 +2,7 @@
 
 import base64
 import json
+import struct
 
 import pytest
 
@@ -10,6 +11,7 @@ from lekiwi_zmq_host.protocol import (
 	ARM_KEYS,
 	STATE_NAMES,
 	build_observation,
+	compressed_image_data,
 	parse_command,
 	state_problem,
 )
@@ -100,3 +102,42 @@ def test_state_problem():
 	assert state_problem(list(STATE_NAMES)[:8], values[:8]) is not None
 	assert state_problem(list(STATE_NAMES), values[:8]) is not None
 	assert state_problem(list(STATE_NAMES), [float('nan')] + values[1:]) is not None
+
+
+def _cdr_compressed_image(data: bytes, frame_id: str = 'front_camera_optical_frame', fmt: str = 'jpeg',
+		little: bool = True) -> bytes:
+	"""sensor_msgs/CompressedImage 를 CDR 로 손으로 직렬화한다 (머리말 4 바이트 뒤 기준 4 바이트 정렬)."""
+	e = '<' if little else '>'
+	body = bytearray(struct.pack(f'{e}iI', 12, 34))
+
+	def put_string(text: str) -> None:
+		while len(body) % 4:
+			body.append(0)
+		raw = text.encode() + b'\x00'
+		body.extend(struct.pack(f'{e}I', len(raw)) + raw)
+
+	put_string(frame_id)
+	put_string(fmt)
+	while len(body) % 4:
+		body.append(0)
+	body.extend(struct.pack(f'{e}I', len(data)) + data)
+	return (b'\x00\x01\x00\x00' if little else b'\x00\x00\x00\x00') + bytes(body)
+
+
+@pytest.mark.parametrize('little', [True, False])
+@pytest.mark.parametrize('frame_id', ['', 'a', 'ab', 'abc', 'front_camera_optical_frame'])
+def test_compressed_image_data_reads_jpeg_bytes(little, frame_id):
+	"""문자열 길이에 따라 정렬 빈칸이 달라져도 data 를 정확히 꺼낸다."""
+	jpeg = bytes(range(256)) * 3
+	assert compressed_image_data(_cdr_compressed_image(jpeg, frame_id=frame_id, little=little)) == jpeg
+
+
+def test_compressed_image_data_rejects_bad_shapes():
+	good = _cdr_compressed_image(b'\xff\xd8\xff\xd9')
+	assert compressed_image_data(good[:-1]) is None        # data 가 잘림
+	assert compressed_image_data(good[:10]) is None        # 문자열 길이가 잘림
+	assert compressed_image_data(b'\x01\x02' + good[2:]) is None   # 모르는 머리말
+	assert compressed_image_data(b'') is None
+	huge = bytearray(good)
+	huge[-8:-4] = struct.pack('<I', 1 << 30)               # data 길이가 실제보다 크다
+	assert compressed_image_data(bytes(huge)) is None

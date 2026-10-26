@@ -267,3 +267,19 @@ def test_estop_while_active_blocks_and_drops_cmd_vel(system):
 	assert wait_for(lambda: host._cmd_vel_pub is None, step=lambda: client.send_action({'x.vel': 0.1}))
 	assert last_status(robot)['session'] == 'blocked'
 	assert robot.power_requests == [True, False]
+
+
+def test_compressed_image_data_matches_rclpy_serialization():
+	"""raw 구독의 바이트 (rclpy 직렬화) 에서 꺼낸 data 가 원래 JPEG 와 같다."""
+	from rclpy.serialization import serialize_message
+	from sensor_msgs.msg import CompressedImage
+
+	from lekiwi_zmq_host.protocol import compressed_image_data
+
+	for frame_id in ('', 'x', 'wrist_camera_optical_frame'):
+		msg = CompressedImage()
+		msg.header.frame_id = frame_id
+		msg.header.stamp.sec = 7
+		msg.format = 'jpeg'
+		msg.data = bytes(range(200)) * 5
+		assert compressed_image_data(serialize_message(msg)) == bytes(msg.data)

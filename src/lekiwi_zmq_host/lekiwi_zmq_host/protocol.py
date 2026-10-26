@@ -7,6 +7,7 @@
 import base64
 import json
 import math
+import struct
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -41,6 +42,41 @@ class Command:
 	arm: dict[str, float] | None
 	base: tuple[float, float, float] | None
 	problems: list[str] = field(default_factory=list)
+
+
+# 직렬화 머리말 (representation identifier): CDR BE · LE, XCDR2 PLAIN BE · LE. 뒤 2 바이트는 options
+_CDR_LITTLE: Final[dict[bytes, bool]] = {
+	b'\x00\x00': False, b'\x00\x01': True, b'\x00\x06': False, b'\x00\x07': True}
+
+
+def compressed_image_data(raw: bytes) -> bytes | None:
+	"""직렬화된 sensor_msgs/CompressedImage (raw 구독) 에서 data(JPEG) 만 꺼낸다. 모양이 틀리면 None.
+
+	rclpy 가 메시지를 파이썬 객체로 풀지 않게 해 Pi CPU 를 아낀다 (카메라 2대 × 30 fps). 필드 순서:
+	header.stamp (int32 · uint32) · header.frame_id (string) · format (string) · data (sequence<uint8>).
+	CDR 은 머리말 4 바이트 뒤를 기준으로 4 바이트 정렬한다 (이 메시지에는 8 바이트 값이 없어 XCDR2 도 같다).
+	"""
+	little = _CDR_LITTLE.get(bytes(raw[:2]))
+	if little is None or len(raw) < 4:
+		return None
+	body = memoryview(raw)[4:]
+	fmt = '<I' if little else '>I'
+	offset = 8   # header.stamp
+	try:
+		for _ in range(2):   # header.frame_id, format: uint32 길이 (끝 NUL 포함) + 바이트
+			offset = (offset + 3) & ~3
+			(length,) = struct.unpack_from(fmt, body, offset)
+			offset += 4 + length
+			if offset > len(body):
+				return None
+		offset = (offset + 3) & ~3
+		(count,) = struct.unpack_from(fmt, body, offset)
+		offset += 4
+	except struct.error:
+		return None
+	if count > len(body) - offset:
+		return None
+	return bytes(body[offset:offset + count])
 
 
 def _is_number(value: Any) -> bool:

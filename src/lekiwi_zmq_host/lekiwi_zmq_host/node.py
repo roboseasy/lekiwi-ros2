@@ -35,6 +35,7 @@ from lekiwi_zmq_host.protocol import (
 	ARM_JOINTS,
 	STATE_TIMEOUT_S,
 	build_observation,
+	compressed_image_data,
 	parse_command,
 	state_problem,
 )
@@ -149,8 +150,9 @@ class ZmqHostNode(Node):
 
 		# ── 4) Subscriber / Publisher / Client ────────────
 		# 팔로워 발행과 같은 QoS (reliable, 깊이 10)
-		self.create_subscription(LerobotState, STATE_TOPIC, self.state_callback, 10)
-		self.create_subscription(String, ARM_STATUS_TOPIC, self.arm_status_callback, 10)
+		# 상태 · 팔로워 상태 (각 30 Hz) · 카메라는 클라이언트나 세션이 있을 때만 구독한다 (_sync_data_subscriptions).
+		# rclpy 는 메시지마다 CPU 를 쓴다 — 늘 받으면 놀 때도 Pi 한 코어의 10 % 넘게 쓴다 (lekiwi01 실측 2026-10-26)
+		self._data_subs: list[Any] = []
 		self.create_subscription(Bool, MOTOR_READY_TOPIC, self.motor_ready_callback, LATCHED_QOS)
 		self.create_subscription(Bool, ARM_READY_TOPIC, self.arm_ready_callback, LATCHED_QOS)
 		self.create_subscription(Bool, ESTOP_TOPIC, self.estop_callback, LATCHED_QOS)
@@ -178,9 +180,13 @@ class ZmqHostNode(Node):
 		if self._state_problem is None:
 			self._state = {'values': dict(zip(names, values)), 'time': time.monotonic()}
 
-	def camera_callback(self, name: str, msg: CompressedImage) -> None:
-		"""카메라 JPEG 최신 하나 (다시 압축하지 않는다)."""
-		self._frames[name] = (msg.data, time.monotonic())
+	def camera_callback(self, name: str, raw: bytes) -> None:
+		"""카메라 JPEG 최신 하나 (raw 구독 — 메시지를 풀지 않고 data 만 꺼낸다, 다시 압축하지 않는다)."""
+		data = compressed_image_data(raw)
+		if data is None:
+			self.get_logger().warning(f'{name} 카메라 메시지를 읽지 못했습니다 (직렬화 모양)', once=True)
+			return
+		self._frames[name] = (data, time.monotonic())
 
 	def arm_status_callback(self, msg: String) -> None:
 		try:
@@ -247,15 +253,28 @@ class ZmqHostNode(Node):
 				self._client_count += 1
 			elif event == zmq.EVENT_DISCONNECTED:
 				self._client_count = max(0, self._client_count - 1)
-		self._sync_camera_subscriptions()
+		self._sync_data_subscriptions()
 
-	def _sync_camera_subscriptions(self) -> None:
+	def _sync_data_subscriptions(self) -> None:
+		"""상태 · 팔로워 상태는 클라이언트나 세션이 있을 때, 카메라는 클라이언트가 있을 때만 구독한다."""
+		is_wanted = self._client_count > 0 or self._session.status()['session'] != SESSION_IDLE
+		if is_wanted and not self._data_subs:
+			self._data_subs = [
+				self.create_subscription(LerobotState, STATE_TOPIC, self.state_callback, 10),
+				self.create_subscription(String, ARM_STATUS_TOPIC, self.arm_status_callback, 10)]
+		elif not is_wanted and self._data_subs:
+			for sub in self._data_subs:
+				self.destroy_subscription(sub)
+			self._data_subs = []
+			self._state = None
+			self._state_problem = None
+			self._arm_status = {}
 		if self._client_count > 0 and not self._camera_subs:
 			self._camera_subs = [
 				self.create_subscription(
 					CompressedImage, topic,
-					lambda msg, name=name: self.camera_callback(name, msg),
-					qos_profile_sensor_data)
+					lambda raw, name=name: self.camera_callback(name, raw),
+					qos_profile_sensor_data, raw=True)
 				for name, topic in CAMERA_TOPICS.items()]
 		elif self._client_count == 0 and self._camera_subs:
 			for sub in self._camera_subs:
@@ -432,6 +451,8 @@ class ZmqHostNode(Node):
 		reason = self._session.status()['reason']
 		if reason:
 			return reason
+		if not self._data_subs:
+			return None   # 아무도 안 붙어 상태를 구독하지 않는다 — '상태 없음' 으로 보이지 않게
 		if self._state_problem:
 			return self._state_problem
 		if self._state is not None and now - self._state['time'] <= STATE_TIMEOUT_S:
