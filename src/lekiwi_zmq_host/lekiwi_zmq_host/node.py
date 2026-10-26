@@ -47,6 +47,7 @@ from lekiwi_zmq_host.session import (
 	PUBLISH_ARM,
 	PUBLISH_BASE,
 	PUBLISH_ZERO,
+	SESSION_IDLE,
 	STATUS_CHANGED,
 	Effect,
 	Session,
@@ -80,6 +81,9 @@ BASE_PARAMETERS: Final[tuple[str, ...]] = (
 	'wheel_radius', 'base_radius', 'kinematics_frame_x', 'kinematics_frame_y',
 	'kinematics_frame_yaw', 'wheel_ids', 'wheel_directions')
 STATUS_PERIOD_S: Final[float] = 1.0
+# [s] ZMQ 클라이언트도 세션도 없을 때 주 타이머 주기. rclpy 타이머 한 번이 Pi 에서 비싸다 (30 Hz 로 놀면 한 코어의
+# 약 20~25%, lekiwi01 실측 2026-10-26). 클라이언트가 붙으면 (모니터 이벤트) 바로 max_loop_freq_hz 로 돌아간다
+IDLE_PERIOD_S: Final[float] = 0.2
 # [s] 베이스 파라미터 요청에 이만큼 답이 없으면 (그사이 컨트롤러가 사라짐 등) 버리고 다시 묻는다
 BASE_REQUEST_TIMEOUT_S: Final[float] = 3.0
 # 드라이버 arm_ready · 베이스 컨트롤러 ready 와 같은 QoS: 늦게 붙어도 마지막 값을 받는다
@@ -123,6 +127,7 @@ class ZmqHostNode(Node):
 		self._base_reason = f'베이스 컨트롤러({BASE_CONTROLLER_NODE}) 파라미터를 아직 읽지 못했습니다'
 		self._base_requested_at: float | None = None   # 답을 기다리는 요청을 보낸 때 (time.monotonic)
 		self._client_count = 0
+		self._estop_publishers = 0   # lekiwi/safety/estop_latched 발행자 수 (1 Hz 로 센다 — 그래프 조회는 비싸다)
 		self._is_peer_warned = False
 		self._last_problem: str | None = None
 		self._last_status: dict[str, Any] | None = None
@@ -157,7 +162,9 @@ class ZmqHostNode(Node):
 		self._parameter_client = AsyncParameterClient(self, BASE_CONTROLLER_NODE)
 
 		# ── 5) Timer ──────────────────────────────────────
-		self.create_timer(1.0 / rate_hz, self.timer_callback)
+		self._fast_period_ns = int(1e9 / rate_hz)
+		self._idle_period_ns = max(self._fast_period_ns, int(IDLE_PERIOD_S * 1e9))
+		self._loop_timer = self.create_timer(IDLE_PERIOD_S, self.timer_callback)
 		self.create_timer(STATUS_PERIOD_S, self.status_timer_callback)
 		self.get_logger().info(
 			f'ZMQ 명령 :{self.get_parameter("port_zmq_cmd").value} · '
@@ -199,6 +206,7 @@ class ZmqHostNode(Node):
 		now = time.monotonic()
 		self._read_monitor()
 		self._read_command(now)
+		self._update_loop_period()
 		self._run(self._session.on_tick(now))
 		meta = {
 			**self._session.status(),
@@ -215,8 +223,16 @@ class ZmqHostNode(Node):
 		if status != self._last_status:
 			self._publish_status(status)
 
+	def _update_loop_period(self) -> None:
+		"""클라이언트가 있거나 세션이 idle 이 아니면 max_loop_freq_hz, 아니면 IDLE_PERIOD_S."""
+		is_busy = self._client_count > 0 or self._session.status()['session'] != SESSION_IDLE
+		period_ns = self._fast_period_ns if is_busy else self._idle_period_ns
+		if self._loop_timer.timer_period_ns != period_ns:
+			self._loop_timer.timer_period_ns = period_ns
+
 	def status_timer_callback(self) -> None:
 		"""1 Hz: 베이스 파라미터를 (다시) 읽고 상태를 다시 낸다."""
+		self._estop_publishers = self.count_publishers(ESTOP_TOPIC)
 		self._refresh_base_parameters()
 		self._publish_status(self._status(time.monotonic()))
 
@@ -429,7 +445,7 @@ class ZmqHostNode(Node):
 			'reason': self._reason(now),
 			'clients': self._client_count,
 			'client_ip': self._session.owner,
-			'estop_unknown': self._estop_latched is None or self.count_publishers(ESTOP_TOPIC) == 0,
+			'estop_unknown': self._estop_latched is None or self._estop_publishers == 0,
 		}
 
 	def _publish_status(self, status: dict[str, Any]) -> None:
