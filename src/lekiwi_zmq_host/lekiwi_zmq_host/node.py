@@ -190,6 +190,7 @@ class ZmqHostNode(Node):
 
 	def estop_callback(self, msg: Bool) -> None:
 		self._estop_latched = msg.data
+		self._run(self._session.on_estop(time.monotonic(), msg.data))
 
 	# ── 타이머 ────────────────────────────────────────────
 	def timer_callback(self) -> None:
@@ -251,6 +252,12 @@ class ZmqHostNode(Node):
 		except zmq.Again:
 			return
 		try:
+			self._handle_command(now, frame)
+		except Exception as error:   # noqa: BLE001 — 인증 없는 네트워크 입력 하나로 노드가 죽지 않게 (바퀴 토크가 켜진 채 남는다)
+			self.get_logger().error(f'명령을 처리하지 못해 버립니다: {error!r}')
+
+	def _handle_command(self, now: float, frame: Any) -> None:
+		try:
 			text = frame.bytes.decode('utf-8')
 		except UnicodeDecodeError:
 			text = ''
@@ -296,8 +303,14 @@ class ZmqHostNode(Node):
 		return reasons
 
 	def _run(self, effects: list[Effect]) -> None:
-		"""Session 이 돌려준 일을 순서대로 한다."""
+		"""Session 이 돌려준 일을 순서대로 한다.
+
+		일 하나가 세션을 바꾸면 (서비스가 없어 _call 이 바로 on_failure → blocked) 남은 일은 낡았으니 버린다.
+		"""
+		state = self._session.state
 		for effect in effects:
+			if self._session.state != state:
+				break
 			if effect.kind == ENABLE_WHEELS:
 				self._call(self._power_client, True, f'바퀴 토크({POWER_SERVICE})')
 			elif effect.kind == ENABLE_ARM:

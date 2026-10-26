@@ -51,7 +51,17 @@ def test_non_finite_value_drops_the_whole_command(bad):
 	assert cmd.base is None and cmd.arm is None
 
 
-@pytest.mark.parametrize('text', ['not json', '[1, 2]', '"x"', ''])
+@pytest.mark.parametrize('text', [
+	'{"x.vel": 1' + '0' * 400 + '}',   # float 로 바꾸면 OverflowError
+	'{"x.vel": 1e306}',                # 바퀴 변환에서 inf → NaN
+	'{"arm_gripper.pos": -1e5, "x.vel": 0}',
+])
+def test_huge_value_drops_the_whole_command(text):
+	cmd = parse_command(text)
+	assert cmd.base is None and cmd.problems
+
+
+@pytest.mark.parametrize('text', ['not json', '[1, 2]', '"x"', '', '[' * 100000])
 def test_unreadable_command(text):
 	cmd = parse_command(text)
 	assert cmd.base is None and cmd.problems

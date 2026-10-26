@@ -42,7 +42,7 @@ PC LeKiwiClient ◀─PULL─ :5556 (관측 JSON) ◀─────────
 
 - `arm_*.pos` 6개는 모두 있거나 모두 없거나. 일부면 팔 부분만 버리고 `reason`. 팔 키가 없으면 팔은 그대로.
 - `x.vel` · `y.vel` [m/s] · `theta.vel` [deg/s] (lerobot 몸체 기준) 은 없으면 0.
-- 아는 키의 값이 유한한 수가 아니면 명령 전체를 버린다 (명령이 온 것으로 치지 않는다). 모르는 키는 무시.
+- 아는 키의 값이 유한한 수가 아니거나 절댓값이 1e4 보다 크면 명령 전체를 버린다 (명령이 온 것으로 치지 않는다). 모르는 키는 무시.
 
 ## 바퀴 변환
 
@@ -60,12 +60,14 @@ lerobot `LeKiwi._body_to_wheel_raw` 와 같은 식(바퀴 0.05 · 몸체 0.125 �
 |------|------|------|
 | `idle` | 시작 · 세션 끝 | 관측만 보낸다 |
 | `active` | idle 에서 첫 유효 명령, 시작 거절 없음 | `lekiwi/motor/power` true, `cmd_vel` 발행자 만듦. 첫 팔 명령 때 `lekiwi/motor/arm_torque` true. 명령마다 `lekiwi/arm/goal` · `cmd_vel` |
-| `blocked` | 시작 거절 · active 중 바깥에서 토크 꺼짐 · 토크 켜기 실패 | 명령을 버린다. **명령이 2 s 끊겨야 idle** (계속 보내는 클라이언트가 비상 정지를 저절로 풀지 못하게) |
+| `blocked` | 시작 거절 · active 중 바깥에서 토크 꺼짐 · 비상 정지 · 토크 켜기 실패 | 명령을 버린다. **명령이 2 s 끊겨야 idle** (계속 보내는 클라이언트가 비상 정지를 저절로 풀지 못하게) |
 
 - 시작 거절 (`reason`): 웹 조작 화면 노드 `lekiwi_web_operator_view` 가 있음 · 다른 `cmd_vel` 발행자 (`collision_monitor` 면 "자율 주행 중") · `lekiwi/safety/estop_latched` true · 팔로워 · 드라이버 노드 없음 · 베이스 파라미터 없음.
 - 명령이 0.5 s 끊기면 `cmd_vel` 0 한 번. 2 s 끊기면 세션 끝: `cmd_vel` 0 → 발행자 지움 → `power` false → idle. **팔 토크는 그대로** (팔이 떨어지지 않게, 웹 권한 끝과 같다).
 - active 중 `lekiwi/motor/ready` 가 (세션 중 true 를 본 뒤) false, 또는 팔 토크를 켠 뒤 `arm_ready` 가 false → blocked, **바로 `cmd_vel` 발행자를 지운다** (게이트웨이는 다른 발행자가 있으면 비상 정지 풀기를 거절한다). `power` true 직후의 false 는 켜지는 중이라 보지 않는다.
-- 토크 켜기 서비스가 없거나 실패하면 blocked, 우리가 켠 바퀴 토크는 끈다.
+- active 중 `lekiwi/safety/estop_latched` 가 true 가 되면 (바퀴 ready 를 보기 전이어도) blocked.
+- 토크 켜기 서비스가 없거나 실패하면 blocked. 그 명령의 남은 일 (발행자 · 팔 토크 · 목표) 은 하지 않는다.
+- active 에서 blocked 가 되면 언제나 이 세션이 켠 바퀴 토크를 바로 끈다 (`power false`, 팔 토크만 꺼졌을 때도).
 - 노드가 꺼지면 `cmd_vel` 0 을 한 번 보낸다. 바퀴 토크는 드라이버가 바퀴 명령이 3 s 끊기면 끈다.
 
 ## 구독 (Subscribe)

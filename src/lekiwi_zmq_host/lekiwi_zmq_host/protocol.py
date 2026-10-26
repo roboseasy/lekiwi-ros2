@@ -24,6 +24,8 @@ STATE_TIMEOUT_S: Final[float] = 0.5
 # [s] 이보다 오래된 카메라 프레임은 싣지 않는다
 CAMERA_TIMEOUT_S: Final[float] = 1.0
 PROTOCOL_VERSION: Final[int] = 1
+# 명령 값의 절댓값 상한: 더 크면 바퀴 변환이 inf → NaN 이 된다 (lerobot 은 큰 속도를 최대 속도로 줄이므로 쓰는 값은 훨씬 작다)
+MAX_COMMAND_ABS: Final[float] = 1e4
 
 
 @dataclass
@@ -42,24 +44,29 @@ class Command:
 
 
 def _is_number(value: Any) -> bool:
-	return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+	if not isinstance(value, (int, float)) or isinstance(value, bool):
+		return False
+	try:
+		return abs(float(value)) <= MAX_COMMAND_ABS   # NaN · inf 는 False
+	except OverflowError:   # 아주 큰 JSON 정수
+		return False
 
 
 def parse_command(text: str) -> Command:
 	"""명령 JSON → Command.
 
 	팔 키 6개는 모두 있거나 모두 없어야 한다 (일부면 팔 부분만 버림). 바퀴 키는 없으면 0.
-	아는 키의 값이 유한한 수가 아니면 명령 전체를 버린다. 모르는 키는 무시한다.
+	아는 키의 값이 유한한 수가 아니거나 MAX_COMMAND_ABS 보다 크면 명령 전체를 버린다. 모르는 키는 무시한다.
 	"""
 	try:
 		data = json.loads(text)
-	except (TypeError, ValueError):
+	except (TypeError, ValueError, RecursionError):   # RecursionError: 아주 깊이 겹친 JSON
 		data = None
 	if not isinstance(data, dict):
 		return Command(None, None, ['명령을 읽을 수 없습니다 (JSON 객체가 아님)'])
 	bad = [key for key in STATE_NAMES if key in data and not _is_number(data[key])]
 	if bad:
-		return Command(None, None, [f'값이 유한한 수가 아닌 명령을 버립니다: {", ".join(bad)}'])
+		return Command(None, None, [f'값이 유한한 수가 아니거나 너무 큰 명령을 버립니다: {", ".join(bad)}'])
 	problems = []
 	present = [key for key in ARM_KEYS if key in data]
 	arm = None

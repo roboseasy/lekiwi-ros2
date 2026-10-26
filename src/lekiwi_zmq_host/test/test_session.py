@@ -9,6 +9,7 @@ from lekiwi_zmq_host.session import (
 	DISABLE_WHEELS,
 	ENABLE_ARM,
 	ENABLE_WHEELS,
+	ESTOP_LATCHED,
 	EXTERNAL_TORQUE_OFF,
 	PUBLISH_ARM,
 	PUBLISH_BASE,
@@ -104,7 +105,7 @@ def test_external_wheel_torque_off_blocks_and_drops_cmd_vel_at_once():
 	assert session.on_external(0.1, False, None) == []   # 켜는 중 (power true 직후 false)
 	assert session.on_external(0.2, True, None) == []
 	effects = session.on_external(0.3, False, None)
-	assert kinds(effects) == [PUBLISH_ZERO, DESTROY_CMD_VEL, STATUS_CHANGED]
+	assert kinds(effects) == [PUBLISH_ZERO, DESTROY_CMD_VEL, DISABLE_WHEELS, STATUS_CHANGED]
 	assert session.status() == {'session': SESSION_BLOCKED, 'reason': EXTERNAL_TORQUE_OFF}
 
 
@@ -143,7 +144,7 @@ def test_blocked_keeps_refusing_until_two_seconds_of_silence_then_restarts():
 		assert session.on_tick(now) == []
 	assert session.state == SESSION_BLOCKED
 	assert session.on_tick(now + 1.99) == []
-	assert kinds(session.on_tick(now + 2.0)) == [STATUS_CHANGED]
+	assert kinds(session.on_tick(now + 2.0)) == [DESTROY_CMD_VEL, STATUS_CHANGED]   # 남은 발행자 대비
 	assert session.status() == {'session': SESSION_IDLE, 'reason': None}
 	effects = session.on_command(now + 2.1, full(), [])
 	assert kinds(effects)[:3] == [ENABLE_WHEELS, CREATE_CMD_VEL, ENABLE_ARM]
@@ -172,3 +173,30 @@ def test_service_failure_blocks_and_turns_our_wheels_off():
 	assert kinds(effects) == [PUBLISH_ZERO, DESTROY_CMD_VEL, DISABLE_WHEELS, STATUS_CHANGED]
 	assert session.status() == {'session': SESSION_BLOCKED, 'reason': '팔 토크 실패: ID 3'}
 	assert Session().on_failure(0.0, 'x') == []
+
+
+def test_external_arm_torque_off_also_turns_our_wheels_off():
+	session = started()
+	session.on_external(0.1, True, True)
+	effects = session.on_external(0.2, None, False)   # 게이트웨이가 팔 힘을 뺐다 · 바퀴는 켜진 채
+	assert kinds(effects) == [PUBLISH_ZERO, DESTROY_CMD_VEL, DISABLE_WHEELS, STATUS_CHANGED]
+	assert session.on_external(0.3, False, None) == []   # 다시 끄지 않는다
+	assert kinds(session.on_tick(2.2)) == [DESTROY_CMD_VEL, STATUS_CHANGED]
+
+
+def test_refused_start_never_turns_wheels_off():
+	session = Session()
+	session.on_command(0.0, full(), ['비상 정지가 걸려 있습니다'])
+	assert DISABLE_WHEELS not in kinds(session.on_tick(2.0))
+
+
+def test_estop_while_active_blocks_even_before_wheels_are_ready():
+	session = started(arm=False)
+	assert session.on_external(0.1, False, None) == []   # 엔코더 기다리는 중
+	effects = session.on_estop(0.2, True)
+	assert kinds(effects) == [PUBLISH_ZERO, DESTROY_CMD_VEL, DISABLE_WHEELS, STATUS_CHANGED]
+	assert session.status() == {'session': SESSION_BLOCKED, 'reason': ESTOP_LATCHED}
+	assert session.on_command(0.3, full(), []) == []
+	assert session.on_estop(0.4, True) == []
+	assert Session().on_estop(0.0, True) == []   # idle 은 시작 거절이 맡는다
+	assert started().on_estop(0.0, False) == []

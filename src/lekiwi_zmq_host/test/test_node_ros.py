@@ -86,7 +86,7 @@ class FakeRobot:
 		], automatically_declare_parameters_from_overrides=True)
 		self._ready_pub = self.base.create_publisher(Bool, 'lekiwi/motor/ready', LATCHED_QOS)
 		self._ready_pub.publish(Bool(data=False))
-		self.base.create_service(SetBool, 'lekiwi/motor/power', self._power)
+		self.power_service = self.base.create_service(SetBool, 'lekiwi/motor/power', self._power)
 		self.base.create_subscription(
 			Twist, 'cmd_vel', lambda m: self.cmd_vel.append((m.linear.x, m.linear.y, m.angular.z)), 10)
 
@@ -112,7 +112,8 @@ class FakeRobot:
 		self.camera.create_timer(1.0 / 30.0, self._camera_tick)
 
 		self.gateway = Node('lekiwi_web_operator')
-		self.gateway.create_publisher(Bool, 'lekiwi/safety/estop_latched', LATCHED_QOS).publish(Bool(data=False))
+		self.estop_pub = self.gateway.create_publisher(Bool, 'lekiwi/safety/estop_latched', LATCHED_QOS)
+		self.estop_pub.publish(Bool(data=False))
 		self.gateway.create_subscription(
 			String, 'lekiwi/zmq_host/status', lambda m: self.statuses.append(json.loads(m.data)), LATCHED_QOS)
 
@@ -233,3 +234,27 @@ def test_vanilla_lekiwi_client_observes_drives_and_stops(system):
 	while time.monotonic() < deadline:
 		assert client._poll_and_get_latest_message() is None
 	assert wait_for(lambda: '관측 상태' in (last_status(robot).get('reason') or ''), timeout=3.0)
+
+
+def test_missing_power_service_blocks_without_leaving_cmd_vel_or_arm_torque(system):
+	host, robot, client = system
+	robot.base.destroy_service(robot.power_service)
+	assert wait_for(lambda: not host._power_client.service_is_ready())
+
+	drive(client, 0.5, {**ARM_ACTION, 'x.vel': 0.1})
+	assert last_status(robot)['session'] == 'blocked'
+	assert '서비스가 없습니다' in last_status(robot)['reason']
+	assert host._cmd_vel_pub is None
+	assert robot.arm_requests == [] and robot.goals == []
+	assert wait_for(lambda: last_status(robot).get('session') == 'idle', timeout=3.0, step=client.get_observation)
+	assert host.count_publishers('cmd_vel') == 0
+
+
+def test_estop_while_active_blocks_and_drops_cmd_vel(system):
+	host, robot, client = system
+	drive(client, 0.5, {'x.vel': 0.1})
+	assert last_status(robot)['session'] == 'active'
+	robot.estop_pub.publish(Bool(data=True))
+	assert wait_for(lambda: host._cmd_vel_pub is None, step=lambda: client.send_action({'x.vel': 0.1}))
+	assert last_status(robot)['session'] == 'blocked'
+	assert robot.power_requests == [True, False]
