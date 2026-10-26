@@ -1,17 +1,22 @@
 """ZMQ 조작 세션 상태기계 (ROS · zmq 없이, 시각을 인자로 받는다).
 
 idle ─첫 유효 명령─▶ active (바퀴 토크 · cmd_vel 발행자) ─2 s 명령 없음─▶ idle (바퀴 토크 끔, 팔은 그대로)
-  └─시작 거절─▶ blocked ◀─바깥에서 토크 꺼짐 · 비상 정지 · 토크 켜기 실패─ active (켠 바퀴 토크는 끈다)
-blocked 는 명령을 버리고, 명령이 2 s 끊겨야 idle 로 돌아간다 (계속 보내는 클라이언트가 비상 정지를 저절로 풀지 못하게).
+  └─시작 거절─▶ waiting ─명령이 오는 동안 1 s 마다 다시 판정, 풀리면─▶ active
+                                   blocked ◀─바깥에서 토크 꺼짐 · 비상 정지 · 토크 켜기 실패─ active (켠 바퀴 토크는 끈다)
+waiting 은 일시적인 시작 대기 (명령을 버리고 로봇을 건드리지 않는다), blocked 는 안전 막힘:
+명령을 버리고, 명령이 2 s 끊겨야 idle 로 돌아간다 (계속 보내는 클라이언트가 비상 정지를 저절로 풀지 못하게).
+세션(waiting · active · blocked)을 연 명령의 보낸 주소가 주인: 다른 주소의 명령은 버린다 (idle 이면 잊는다).
 노드는 돌려받은 Effect 를 순서대로 실행한다.
 """
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, Final
 
 from lekiwi_zmq_host.protocol import Command
 
 SESSION_IDLE: Final[str] = 'idle'
+SESSION_WAITING: Final[str] = 'waiting'
 SESSION_ACTIVE: Final[str] = 'active'
 SESSION_BLOCKED: Final[str] = 'blocked'
 
@@ -19,9 +24,14 @@ SESSION_BLOCKED: Final[str] = 'blocked'
 ZERO_TIMEOUT_S: Final[float] = 0.5
 # [s] 명령이 이만큼 끊기면 세션 끝 (blocked 는 idle 로)
 SESSION_TIMEOUT_S: Final[float] = 2.0
+# [s] waiting 에서 시작 거절을 다시 보는 간격 (ROS 그래프 검사가 싸지 않아 명령마다 하지 않는다)
+START_RECHECK_S: Final[float] = 1.0
+# [s] 주인이 아닌 주소의 명령을 버린 뒤 상태에 싣는 시간 (그 명령이 계속 오면 늘어난다)
+REJECTED_PEER_HOLD_S: Final[float] = 3.0
 
 EXTERNAL_TORQUE_OFF: Final[str] = '바깥에서 토크가 꺼졌습니다 (비상 정지?)'
 ESTOP_LATCHED: Final[str] = '비상 정지가 걸려 있습니다'
+OTHER_PEER: Final[str] = '다른 PC({})가 조작 중입니다'
 
 # Effect.kind
 ENABLE_WHEELS: Final[str] = 'enable_wheels'        # lekiwi/motor/power true
@@ -58,9 +68,15 @@ class Session:
 		# 이 세션에서 토크가 켜진 것을 보았는가 (그 뒤에 false 가 되면 바깥에서 끈 것)
 		self._is_wheels_watched = False
 		self._is_arm_watched = False
+		self._start_checked_time = 0.0
+		self.owner: str | None = None   # 세션을 연 명령의 보낸 주소 (모르면 None: 주인 검사 없음)
+		self._rejected_peer: str | None = None
+		self._rejected_until = 0.0
 
 	def status(self) -> dict[str, Any]:
-		return {'session': self.state, 'reason': self.reason}
+		"""session · reason (세션 이유가 없으면 주인이 아닌 명령을 버린 이유) · rejected_peer."""
+		rejected = OTHER_PEER.format(self.owner) if self._rejected_peer else None
+		return {'session': self.state, 'reason': self.reason or rejected, 'rejected_peer': self._rejected_peer}
 
 	def _set(self, state: str, reason: str | None) -> list[Effect]:
 		if (state, reason) == (self.state, self.reason):
@@ -68,25 +84,40 @@ class Session:
 		self.state, self.reason = state, reason
 		return [Effect(STATUS_CHANGED)]
 
-	def on_command(self, now: float, cmd: Command, blockers: list[str]) -> list[Effect]:
+	def on_command(
+		self, now: float, cmd: Command, blockers: Callable[[], list[str]], peer: str | None = None,
+	) -> list[Effect]:
 		"""명령 하나.
 
 		Args:
 			now: 지금 [s].
 			cmd: 해석한 명령. base 가 None 이면 (명령 전체를 버림) 명령이 온 것으로 치지 않는다.
-			blockers: 세션 시작을 막는 이유 (idle 에서만 본다).
+			blockers: 세션 시작을 막는 이유 (우선순위 순)를 돌려준다. idle 에서, waiting 에서는
+				START_RECHECK_S 마다만 부른다.
+			peer: 명령을 보낸 주소. None 이면 주인 검사를 하지 않는다.
 		"""
+		if self.state != SESSION_IDLE and None not in (self.owner, peer) and peer != self.owner:
+			# 감시 시간을 늘리지 않는다: 다른 PC 가 남의 세션 (특히 blocked) 을 붙잡지 못하게
+			is_new = peer != self._rejected_peer
+			self._rejected_peer, self._rejected_until = peer, now + REJECTED_PEER_HOLD_S
+			return [Effect(STATUS_CHANGED)] if is_new else []
 		if cmd.base is None:
-			if self.state == SESSION_BLOCKED:
+			if self.state in (SESSION_WAITING, SESSION_BLOCKED):
 				return []
 			return self._set(self.state, cmd.problems[0] if cmd.problems else None)
 		self._last_command_time = now
 		if self.state == SESSION_BLOCKED:
 			return []
+		if self.state == SESSION_WAITING and now - self._start_checked_time < START_RECHECK_S:
+			return []
 		effects: list[Effect] = []
-		if self.state == SESSION_IDLE:
-			if blockers:
-				return self._set(SESSION_BLOCKED, blockers[0])
+		if self.state in (SESSION_IDLE, SESSION_WAITING):
+			if self.state == SESSION_IDLE:
+				self.owner = peer
+			reasons = blockers()
+			self._start_checked_time = now
+			if reasons:
+				return self._set(SESSION_WAITING, reasons[0])
 			self._is_arm_enabled = False
 			self._is_wheels_enabled = True
 			self._is_wheels_watched = False
@@ -103,18 +134,25 @@ class Session:
 		return effects + self._set(SESSION_ACTIVE, cmd.problems[0] if cmd.problems else None)
 
 	def on_tick(self, now: float) -> list[Effect]:
-		"""주기마다: 명령 끊김을 본다."""
+		"""주기마다: 명령 끊김 · 버린 주소 표시 시간을 본다."""
 		if self.state == SESSION_IDLE or self._last_command_time is None:
 			return []
 		silence = now - self._last_command_time
-		if self.state == SESSION_BLOCKED:
-			# 발행자는 막힐 때 지웠다: 남았을 때를 대비해 한 번 더 (지울 것이 없으면 노드가 무시)
-			return [Effect(DESTROY_CMD_VEL), *self._set(SESSION_IDLE, None)] if silence >= SESSION_TIMEOUT_S else []
 		if silence >= SESSION_TIMEOUT_S:
-			self._is_wheels_enabled = False
-			return [
-				Effect(PUBLISH_ZERO), Effect(DESTROY_CMD_VEL), Effect(DISABLE_WHEELS),
-				*self._set(SESSION_IDLE, None)]
+			effects: list[Effect] = []
+			if self.state == SESSION_ACTIVE:
+				self._is_wheels_enabled = False
+				effects = [Effect(PUBLISH_ZERO), Effect(DESTROY_CMD_VEL), Effect(DISABLE_WHEELS)]
+			elif self.state == SESSION_BLOCKED:
+				# 발행자는 막힐 때 지웠다: 남았을 때를 대비해 한 번 더 (지울 것이 없으면 노드가 무시)
+				effects = [Effect(DESTROY_CMD_VEL)]
+			self.owner = self._rejected_peer = None
+			return effects + self._set(SESSION_IDLE, None)
+		if self._rejected_peer and now >= self._rejected_until:
+			self._rejected_peer = None
+			return [Effect(STATUS_CHANGED)]
+		if self.state != SESSION_ACTIVE:
+			return []
 		if silence >= ZERO_TIMEOUT_S and not self._is_zero_sent:
 			self._is_zero_sent = True
 			return [Effect(PUBLISH_ZERO)]

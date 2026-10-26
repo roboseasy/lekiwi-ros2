@@ -37,7 +37,7 @@
 | `cmd_vel` | `geometry_msgs/Twist` | 조작 창 · 게이트웨이 · ZMQ 호스트(세션 active일 때만 발행자가 있다) 또는 Nav2 (`collision_monitor`) 중 하나 | 베이스 컨트롤러 | 기본 |
 | `lekiwi/arm/goal` | `sensor_msgs/JointState` | 게이트웨이, ZMQ 호스트 | 팔로워 팔 | SensorData. 이름 `arm_shoulder_pan` … `arm_gripper` (`.pos` 없음), LeRobot 단위 (몸 관절 [deg], 그리퍼 0~100). 6개가 모두 있어야 받는다 |
 | `lekiwi/arm/status` | `std_msgs/String` (JSON) | 팔로워 팔 | 게이트웨이, ZMQ 호스트 | reliable, 깊이 10, 30 Hz. `{state, reason, robot_id, diffs, ramp_progress, warnings}` (`lekiwi_lerobot` README) |
-| `lekiwi/zmq_host/status` | `std_msgs/String` (JSON) | ZMQ 호스트 | 게이트웨이 | reliable + transient_local, 깊이 1. 바뀔 때 + 1 Hz. `{session: idle\|active\|blocked, reason, clients, client_ip, estop_unknown}` |
+| `lekiwi/zmq_host/status` | `std_msgs/String` (JSON) | ZMQ 호스트 | 게이트웨이 | reliable + transient_local, 깊이 1. 바뀔 때 + 1 Hz. `{session: idle\|waiting\|active\|blocked, reason, rejected_peer, clients, client_ip, estop_unknown}`. `client_ip` = 세션 주인, `rejected_peer` = 3 s 안에 명령을 버린 다른 주소 |
 | `lekiwi/safety/estop_latched` | `std_msgs/Bool` | 게이트웨이 | ZMQ 호스트 | reliable + transient_local, 깊이 1. 비상 정지가 걸려 있으면 true (걸리면 조작 화면 노드가 사라져 노드만으로는 알 수 없다). 발행자가 없으면 ZMQ 호스트는 '모름'으로 보고 거절하지 않는다 (`estop_unknown`) |
 | `odom` | `nav_msgs/Odometry` | 베이스 컨트롤러 | Cartographer, Nav2 | 기본, 50 Hz |
 | `lekiwi/motor/ready` | `std_msgs/Bool` | 베이스 컨트롤러 | 조작 창, Nav2 감독 | reliable + transient_local, 깊이 1 |
@@ -95,5 +95,6 @@
 | Nav2 주행 중 조작 화면(PC RViz 노드 `rviz` · `rviz2`)이 모두 사라짐 | Nav2 감독 도구 | 토크 끔 (`lekiwi/motor/power false`). 화면이 없으면 처음부터 켜지 않는다 |
 | PC ZMQ 명령이 0.5 s 끊김 | ZMQ 호스트 | `cmd_vel` 0 한 번 (베이스 컨트롤러는 0.3 s에 이미 선다). 팔은 그 자리 |
 | PC ZMQ 명령이 2 s 끊김 | ZMQ 호스트 | 세션 끝: `cmd_vel` 0 → 발행자 지움 → `lekiwi/motor/power` false. 팔 토크는 그대로 (팔이 떨어지지 않게) |
-| ZMQ 세션 시작 때 웹 조작 화면(`lekiwi_web_operator_view`) · 다른 `cmd_vel` 발행자 · 비상 정지 · 팔로워 · 드라이버 · 베이스 파라미터 없음 | ZMQ 호스트 | 시작 거절 (`blocked`, 이유는 `lekiwi/zmq_host/status`). 토크를 켜지 않는다 |
+| ZMQ 세션 시작 때 웹 조작 화면(`lekiwi_web_operator_view`) · 다른 `cmd_vel` 발행자 · 비상 정지 · 팔로워 · 드라이버 · 베이스 파라미터 없음 | ZMQ 호스트 | 시작 대기 (`waiting`, 이유는 `lekiwi/zmq_host/status`). 토크 · `cmd_vel` 발행자를 건드리지 않고, 명령이 오는 동안 1 s 마다 다시 보아 풀리면 시작한다. 명령이 2 s 끊기면 `idle` |
+| ZMQ 세션 중 세션을 연 PC 가 아닌 주소의 명령 | ZMQ 호스트 | 버린다 (세션 감시 시간도 늘리지 않는다). 3 s 동안 `rejected_peer` · "다른 PC(<주인 IP>)가 조작 중입니다". 세션이 `idle` 이 되면 주인을 잊는다 |
 | ZMQ 세션 중 바퀴 · 팔 토크가 밖에서 꺼짐 (비상 정지) | ZMQ 호스트 | `blocked`, 바로 `cmd_vel` 발행자를 지운다 (남기면 게이트웨이가 비상 정지를 못 푼다). 명령이 2 s 끊기기 전에는 토크를 다시 켜지 않는다 |

@@ -47,7 +47,6 @@ from lekiwi_zmq_host.session import (
 	PUBLISH_ARM,
 	PUBLISH_BASE,
 	PUBLISH_ZERO,
-	SESSION_IDLE,
 	STATUS_CHANGED,
 	Effect,
 	Session,
@@ -122,7 +121,7 @@ class ZmqHostNode(Node):
 		self._base_reason = f'베이스 컨트롤러({BASE_CONTROLLER_NODE}) 파라미터를 아직 읽지 못했습니다'
 		self._is_base_request_pending = False
 		self._client_count = 0
-		self._client_ip: str | None = None
+		self._is_peer_warned = False
 		self._last_problem: str | None = None
 		self._last_status: dict[str, Any] | None = None
 		self._cmd_vel_pub: Any = None
@@ -265,16 +264,17 @@ class ZmqHostNode(Node):
 		if cmd.problems and cmd.problems[0] != self._last_problem:
 			self.get_logger().warning(cmd.problems[0])
 		self._last_problem = cmd.problems[0] if cmd.problems else None
-		if cmd.base is None:
-			self._run(self._session.on_command(now, cmd, []))
-			return
-		if self._session.state == SESSION_IDLE:
-			try:
-				self._client_ip = frame.get('Peer-Address')
-			except zmq.ZMQError:
-				self._client_ip = None
-		blockers = self._start_blockers() if self._session.state == SESSION_IDLE else []
-		self._run(self._session.on_command(now, cmd, blockers))
+		self._run(self._session.on_command(now, cmd, self._start_blockers, self._peer_address(frame)))
+
+	def _peer_address(self, frame: Any) -> str | None:
+		"""명령을 보낸 주소. pyzmq · libzmq 가 주지 않으면 None (세션 주인 검사 없이 돈다)."""
+		try:
+			return frame.get('Peer-Address')
+		except (zmq.ZMQError, AttributeError) as error:
+			if not self._is_peer_warned:
+				self._is_peer_warned = True
+				self.get_logger().warning(f'명령을 보낸 주소를 알 수 없어 세션 주인을 검사하지 않습니다: {error!r}')
+			return None
 
 	# ── 세션 ──────────────────────────────────────────────
 	def _start_blockers(self) -> list[str]:
@@ -406,8 +406,9 @@ class ZmqHostNode(Node):
 	# ── 상태 ──────────────────────────────────────────────
 	def _reason(self, now: float) -> str | None:
 		"""세션 이유, 없으면 관측을 보내지 못하는 이유."""
-		if self._session.reason:
-			return self._session.reason
+		reason = self._session.status()['reason']
+		if reason:
+			return reason
 		if self._state_problem:
 			return self._state_problem
 		if self._state is not None and now - self._state['time'] <= STATE_TIMEOUT_S:
@@ -416,12 +417,11 @@ class ZmqHostNode(Node):
 		return f'관측 상태({STATE_TOPIC})가 없습니다' + (f' — 팔로워: {follower}' if follower else '')
 
 	def _status(self, now: float) -> dict[str, Any]:
-		is_idle = self._session.state == SESSION_IDLE
 		return {
-			'session': self._session.state,
+			**self._session.status(),
 			'reason': self._reason(now),
 			'clients': self._client_count,
-			'client_ip': None if is_idle else self._client_ip,
+			'client_ip': self._session.owner,
 			'estop_unknown': self._estop_latched is None or self.count_publishers(ESTOP_TOPIC) == 0,
 		}
 

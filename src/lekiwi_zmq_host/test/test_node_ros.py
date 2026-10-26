@@ -207,7 +207,8 @@ def test_vanilla_lekiwi_client_observes_drives_and_stops(system):
 	assert list(goal.position) == pytest.approx(list(ARM_ACTION.values()))
 	assert robot.cmd_vel[-1] == pytest.approx((0.1, 0.0, 0.0), abs=1e-4)
 	assert last_status(robot) == {
-		'session': 'active', 'reason': None, 'clients': 1, 'client_ip': '127.0.0.1', 'estop_unknown': False}
+		'session': 'active', 'reason': None, 'rejected_peer': None, 'clients': 1, 'client_ip': '127.0.0.1',
+		'estop_unknown': False}
 
 	# 3) 명령이 끊기면 0 → 2 s 에 세션 끝 (바퀴 토크 끔, 팔은 그대로)
 	assert wait_for(lambda: last_status(robot).get('session') == 'idle', timeout=3.0, step=client.get_observation)
@@ -215,16 +216,24 @@ def test_vanilla_lekiwi_client_observes_drives_and_stops(system):
 	assert robot.power_requests == [True, False] and robot.arm_requests == [True]
 	assert host._cmd_vel_pub is None
 
-	# 4) 웹 화면이 조작 중이면 시작을 거절한다
+	# 4) 웹 화면이 조작 중이면 기다리고, 화면이 사라지면 계속 보내던 클라이언트가 그대로 시작한다
 	view = Node('lekiwi_web_operator_view')
 	try:
 		assert wait_for(lambda: 'lekiwi_web_operator_view' in host.get_node_names())
 		drive(client, 0.5, {'x.vel': 0.1})
-		assert last_status(robot)['session'] == 'blocked'
+		assert last_status(robot)['session'] == 'waiting'
 		assert last_status(robot)['reason'] == '웹 화면이 조작 중입니다'
-		assert robot.power_requests == [True, False]
+		assert robot.power_requests == [True, False] and host._cmd_vel_pub is None
 	finally:
 		view.destroy_node()
+
+	def keep_driving():
+		client.send_action({'x.vel': 0.1})
+		client.get_observation()
+
+	assert wait_for(lambda: last_status(robot).get('session') == 'active', timeout=5.0, step=keep_driving)
+	assert robot.power_requests == [True, False, True] and host._cmd_vel_pub is not None
+	assert wait_for(lambda: last_status(robot).get('session') == 'idle', timeout=3.0, step=client.get_observation)
 
 	# 5) 상태가 끊기면 관측을 보내지 않는다 (LeKiwiClient 가 0 자세로 채우지 않게)
 	robot.is_publishing_state = False

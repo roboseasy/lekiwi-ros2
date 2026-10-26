@@ -59,10 +59,15 @@ lerobot `LeKiwi._body_to_wheel_raw` 와 같은 식(바퀴 0.05 · 몸체 0.125 �
 | 상태 | 들어가는 때 | 하는 일 |
 |------|------|------|
 | `idle` | 시작 · 세션 끝 | 관측만 보낸다 |
-| `active` | idle 에서 첫 유효 명령, 시작 거절 없음 | `lekiwi/motor/power` true, `cmd_vel` 발행자 만듦. 첫 팔 명령 때 `lekiwi/motor/arm_torque` true. 명령마다 `lekiwi/arm/goal` · `cmd_vel` |
-| `blocked` | 시작 거절 · active 중 바깥에서 토크 꺼짐 · 비상 정지 · 토크 켜기 실패 | 명령을 버린다. **명령이 2 s 끊겨야 idle** (계속 보내는 클라이언트가 비상 정지를 저절로 풀지 못하게) |
+| `waiting` | idle 에서 첫 유효 명령, 시작 거절 있음 | 명령을 버린다 (토크 · `cmd_vel` 발행자를 건드리지 않는다). 명령이 오는 동안 **1 s 마다 시작 거절을 다시 보고**, 풀리면 그 명령으로 active. 명령이 2 s 끊기면 idle |
+| `active` | idle · waiting 에서 유효 명령, 시작 거절 없음 | `lekiwi/motor/power` true, `cmd_vel` 발행자 만듦. 첫 팔 명령 때 `lekiwi/motor/arm_torque` true. 명령마다 `lekiwi/arm/goal` · `cmd_vel` |
+| `blocked` | 안전 막힘: active 중 바깥에서 토크 꺼짐 · 비상 정지 · 토크 켜기 실패 | 명령을 버린다. **명령이 2 s 끊겨야 idle** (계속 보내는 클라이언트가 비상 정지를 저절로 풀지 못하게) |
 
 - 시작 거절 (`reason`): 웹 조작 화면 노드 `lekiwi_web_operator_view` 가 있음 · 다른 `cmd_vel` 발행자 (`collision_monitor` 면 "자율 주행 중") · `lekiwi/safety/estop_latched` true · 팔로워 · 드라이버 노드 없음 · 베이스 파라미터 없음.
+  대개 일시적이다 (베이스 파라미터를 아직 못 읽음 · 팔로워가 뜨는 중 · 웹 권한을 막 놓아 조작 화면 노드가 그래프에 1 s 남짓 남음): 그래서 blocked 가 아니라 waiting 이고, 앱이 30 Hz 로 계속 보내도 풀리면 저절로 시작한다.
+- **세션 주인**: 세션(waiting · active · blocked)을 연 명령의 ZMQ `Peer-Address` 가 주인 (`client_ip`). 다른 주소의 명령은 버리고 감시 시간도 늘리지 않으며,
+  마지막으로 버린 뒤 3 s 동안 상태에 `rejected_peer` 와 `reason` "다른 PC(<주인 IP>)가 조작 중입니다" 를 싣는다 (세션 자체의 이유가 있으면 그것이 먼저). idle 이 되면 주인을 잊는다.
+  pyzmq 가 주소를 주지 않으면 주인 검사 없이 돈다 (경고 로그 한 번).
 - 명령이 0.5 s 끊기면 `cmd_vel` 0 한 번. 2 s 끊기면 세션 끝: `cmd_vel` 0 → 발행자 지움 → `power` false → idle. **팔 토크는 그대로** (팔이 떨어지지 않게, 웹 권한 끝과 같다).
 - active 중 `lekiwi/motor/ready` 가 (세션 중 true 를 본 뒤) false, 또는 팔 토크를 켠 뒤 `arm_ready` 가 false → blocked, **바로 `cmd_vel` 발행자를 지운다** (게이트웨이는 다른 발행자가 있으면 비상 정지 풀기를 거절한다). `power` true 직후의 false 는 켜지는 중이라 보지 않는다.
 - active 중 `lekiwi/safety/estop_latched` 가 true 가 되면 (바퀴 ready 를 보기 전이어도) blocked.
@@ -86,7 +91,7 @@ lerobot `LeKiwi._body_to_wheel_raw` 와 같은 식(바퀴 0.05 · 몸체 0.125 �
 |------|------|------|------|
 | `lekiwi/arm/goal` | `sensor_msgs/JointState` | SensorData (팔로워 구독과 같음) | 이름 `arm_shoulder_pan` … `arm_gripper`, LeRobot 단위 |
 | `cmd_vel` | `geometry_msgs/Twist` | 깊이 10 | **세션이 active 일 때만 발행자가 있다** |
-| `lekiwi/zmq_host/status` | `std_msgs/String` | reliable + transient_local | 바뀔 때 + 1 Hz: `{"session": "idle\|active\|blocked", "reason": str\|null, "clients": int, "client_ip": str\|null, "estop_unknown": bool}`. `client_ip` 는 세션을 연 명령의 보낸 주소 (idle 이면 null) |
+| `lekiwi/zmq_host/status` | `std_msgs/String` | reliable + transient_local | 바뀔 때 + 1 Hz: `{"session": "idle\|waiting\|active\|blocked", "reason": str\|null, "rejected_peer": str\|null, "clients": int, "client_ip": str\|null, "estop_unknown": bool}`. `client_ip` 는 세션 주인 (세션을 연 명령의 보낸 주소, idle 이면 null), `rejected_peer` 는 3 s 안에 버린 다른 주소 |
 
 서비스 클라이언트: `lekiwi/motor/power` · `lekiwi/motor/arm_torque` (`std_srvs/SetBool`, 비동기), 파라미터: `lekiwi_base_controller_node/get_parameters`.
 
@@ -98,7 +103,7 @@ lerobot `LeKiwi._body_to_wheel_raw` 와 같은 식(바퀴 0.05 · 몸체 0.125 �
 | `port_zmq_observations` | 5556 | 관측 포트 (bringup `zmq_obs_port`) |
 | `max_loop_freq_hz` | 30.0 | 명령 읽기 · 관측 주기 |
 
-시간 상수 (계약이라 파라미터로 두지 않는다): 상태 0.5 s · 카메라 1 s · 명령 0 0.5 s · 세션 끝 2 s.
+시간 상수 (계약이라 파라미터로 두지 않는다): 상태 0.5 s · 카메라 1 s · 명령 0 0.5 s · 세션 끝 2 s · waiting 다시 보기 1 s · 버린 주소 표시 3 s.
 
 ## 빌드 · 시험
 
@@ -121,7 +126,7 @@ ROS_DOMAIN_ID=185 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST colcon test --packages
 
 통합 시험은 도메인 180~189 · `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST` 로 띄워 다른 ROS 그래프와 섞이지 않는다.
 확인하는 것: 관측 9개 · 카메라 2대 수신, action → `lekiwi/arm/goal` · `cmd_vel` · 토크 서비스, 2 s 끊김 → 세션 끝 (`power` false, 팔 토크 그대로),
-웹 조작 화면 노드가 있으면 거절, 상태 발행을 멈추면 관측이 멈춤.
+웹 조작 화면 노드가 있으면 waiting · 그 노드가 사라지면 계속 보내던 클라이언트가 active, 상태 발행을 멈추면 관측이 멈춤.
 
 ## 실행
 
@@ -150,5 +155,5 @@ robot.connect()   # 상태가 없으면 (보정 없음 등) 첫 관측을 못 �
 
 - 인증 없음 (옛 호스트와 같다). 교실 배포 전 로봇 쪽에서 다룬다.
 - 다른 조작 주체와의 배타는 ROS 그래프 (조작 화면 노드 · `cmd_vel` 발행자) 와 상태 토픽에 기댄다. 판단이 게이트웨이와 이 노드 두 곳이다.
-- 시작 거절 검사는 세션을 시작할 때만 한다. active 중에는 토크 꺼짐만 본다 (웹 주행은 '다른 `cmd_vel` 발행자'로 게이트웨이가 막는다).
+- 시작 거절 검사는 세션을 시작할 때 (idle · waiting) 만 한다. active 중에는 토크 꺼짐만 본다 (웹 주행은 '다른 `cmd_vel` 발행자'로 게이트웨이가 막는다).
 - 팔로워 안전 제한(45° 튐 막기 · 2 s 램프)이 정책 · EEF 명령에도 걸린다.
