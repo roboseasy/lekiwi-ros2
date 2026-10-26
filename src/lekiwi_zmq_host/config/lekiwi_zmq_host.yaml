@@ -1,0 +1,8 @@
+lekiwi_zmq_host_node:
+  ros__parameters:
+    # lerobot LeKiwi 호스트와 같은 포트 (LeKiwiClientConfig port_zmq_cmd · port_zmq_observations).
+    # bringup 인자 zmq_cmd_port · zmq_obs_port 가 덮어쓴다. 인증이 없어 같은 망 누구나 붙을 수 있다
+    port_zmq_cmd: 5555
+    port_zmq_observations: 5556
+    # 명령 읽기 · 관측 발행 주기 (lerobot LeKiwiHostConfig max_loop_freq_hz, 실수로 쓴다)
+    max_loop_freq_hz: 30.0

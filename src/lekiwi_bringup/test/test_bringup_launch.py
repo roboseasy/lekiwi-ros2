@@ -62,7 +62,8 @@ def run(module, **arguments):
 	defaults = {
 		'robot_profile': '', 'use_imu': 'true', 'use_lidar': 'true', 'use_camera': 'false',
 		'use_motors': 'true', 'use_base_controller': 'true', 'use_arm': 'true',
-		'lerobot_python': '/no/lerobot/python', 'robot_id': '', 'joint_state_rate': '10'}
+		'lerobot_python': '/no/lerobot/python', 'robot_id': '', 'joint_state_rate': '10',
+		'use_zmq_host': 'true', 'zmq_cmd_port': '5555', 'zmq_obs_port': '5556'}
 	defaults.update(arguments)
 	context = LaunchContext()
 	for name, value in defaults.items():
@@ -306,6 +307,32 @@ def expand_nodes(description, context):
 	return found
 
 
+def test_zmq_host_skipped_with_a_log_line_when_package_missing(bringup):
+	actions = run(bringup)
+	assert 'lekiwi_zmq_host_node' not in nodes(actions)
+	assert any('lekiwi_zmq_host' in message for message in log_messages(actions))
+
+
+def test_zmq_host_runs_on_system_python_with_port_arguments_last(bringup):
+	bringup.installed.add('lekiwi_zmq_host')
+	host = nodes(run(bringup))['lekiwi_zmq_host_node']
+	assert (host['package'], host['executable']) == ('lekiwi_zmq_host', 'lekiwi_zmq_host_node')
+	assert 'prefix' not in host   # lerobot 가상환경을 쓰지 않는다
+	assert parameters(host) == [
+		'/share/lekiwi_zmq_host/config/lekiwi_zmq_host.yaml', str(PACKAGE / 'config' / 'robot_profile.yaml'),
+		{'port_zmq_cmd': 5555, 'port_zmq_observations': 5556}]
+	host = nodes(run(bringup, zmq_cmd_port='6555', zmq_obs_port='6556'))['lekiwi_zmq_host_node']
+	assert parameters(host)[-1] == {'port_zmq_cmd': 6555, 'port_zmq_observations': 6556}
+
+
+def test_zmq_host_can_be_turned_off_and_needs_the_motors(bringup):
+	bringup.installed.add('lekiwi_zmq_host')
+	for arguments in ({'use_zmq_host': 'false'}, {'use_motors': 'false'}):
+		actions = run(bringup, **arguments)
+		assert 'lekiwi_zmq_host_node' not in nodes(actions)
+		assert not any('zmq' in message.lower() for message in log_messages(actions))
+
+
 def test_profile_resolution_order(bringup, tmp_path):
 	default_profile = str(PACKAGE / 'config' / 'robot_profile.yaml')
 	assert bringup.resolve_profile(context_with(robot_profile='')) == default_profile
@@ -334,7 +361,8 @@ def test_default_profile_only_names_launched_nodes():
 	profile = yaml.safe_load((PACKAGE / 'config' / 'robot_profile.yaml').read_text())
 	assert set(profile) <= {
 		'lekiwi_motor_driver_node', 'lekiwi_base_controller_node', 'lekiwi_lidar_node', 'lekiwi_imu_node',
-		'lekiwi_scan_filter_node', 'front_camera_node', 'wrist_camera_node', 'lekiwi_follower_arm_node'}
+		'lekiwi_scan_filter_node', 'front_camera_node', 'wrist_camera_node', 'lekiwi_follower_arm_node',
+		'lekiwi_zmq_host_node'}
 	for section in profile.values():
 		assert set(section) == {'ros__parameters'}
 	controller = profile['lekiwi_base_controller_node']['ros__parameters']
@@ -351,12 +379,16 @@ def test_launch_description_declares_arguments():
 	names = {entity.name for entity in description.entities if hasattr(entity, 'default_value')}
 	assert names == {
 		'robot_profile', 'use_imu', 'use_lidar', 'use_camera', 'use_motors', 'use_base_controller',
-		'use_arm', 'lerobot_python', 'robot_id', 'joint_state_rate'}
+		'use_arm', 'lerobot_python', 'robot_id', 'joint_state_rate', 'use_zmq_host', 'zmq_cmd_port',
+		'zmq_obs_port'}
 	assert os.path.basename(module.USER_PROFILE) == 'robot_profile.yaml'
 	defaults = {
 		entity.name: entity.default_value for entity in description.entities
 		if hasattr(entity, 'default_value')}
 	assert ''.join(part.text for part in defaults['use_arm']) == 'true'
+	assert ''.join(part.text for part in defaults['use_zmq_host']) == 'true'
+	assert ''.join(part.text for part in defaults['zmq_cmd_port']) == '5555'
+	assert ''.join(part.text for part in defaults['zmq_obs_port']) == '5556'
 	# 계정 이름을 박지 않고 홈 기준으로 찾는다 (lekiwi04: /home/roboseasy/lerobot060_venv/bin/python)
 	assert module.LEROBOT_PYTHON == os.path.join(
 		os.path.expanduser('~'), 'lerobot060_venv', 'bin', 'python')

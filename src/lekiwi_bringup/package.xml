@@ -20,6 +20,7 @@
   <exec_depend>lekiwi_scan_filter</exec_depend>
   <exec_depend>lekiwi_motor_driver</exec_depend>
   <exec_depend>lekiwi_base_controller</exec_depend>
+  <exec_depend>lekiwi_zmq_host</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>python3-yaml</test_depend>

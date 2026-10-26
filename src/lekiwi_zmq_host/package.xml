@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>lekiwi_zmq_host</name>
+  <version>0.0.1</version>
+  <description>lerobot LeKiwi 호스트와 같은 ZMQ 프로토콜(명령 5555 · 관측 5556)을 ROS 토픽 · 서비스로 바꾸는 노드. PC는 ROS 없이 lerobot LeKiwiClient로 붙는다</description>
+  <maintainer email="khw11044@gmail.com">khw</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <!-- 시스템 python으로 돈다. lerobot은 쓰지 않는다 (같은 식을 옮기고 시험이 lerobot과 대조한다) -->
+  <exec_depend>python3-zmq</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>lekiwi_msgs</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

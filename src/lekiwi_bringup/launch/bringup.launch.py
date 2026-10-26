@@ -4,7 +4,8 @@
   1. 로봇 모델   robot_state_publisher, joint_state_publisher
   2. 센서        lekiwi_imu, lekiwi_lidar, lekiwi_scan_filter, lekiwi_camera(선택)
   3. 모터        lekiwi_motor_driver(버스를 여는 유일한 노드), lekiwi_base_controller,
-                 lekiwi_lerobot follower_arm(use_arm, 설치돼 있고 lerobot_python이 있을 때만)
+                 lekiwi_lerobot follower_arm(use_arm, 설치돼 있고 lerobot_python이 있을 때만),
+                 lekiwi_zmq_host(use_zmq_host, 설치돼 있을 때만: PC의 lerobot LeKiwiClient가 ZMQ로 붙는다)
 
 노드마다 파라미터를 [패키지 기본 설정 → (베이스 컨트롤러만) base_frame.yaml → 장비 프로파일
 → (팔로워만, 있으면) ~/lekiwi_ws/arm_profile.yaml → (팔로워만, 주면) robot_id 인자] 순서로 넣는다. 뒤에 넣은 값이 이긴다.
@@ -166,7 +167,32 @@ def launch_setup(context):
 			))
 		if use_arm:
 			actions.extend(follower_arm(context, profile))
+		if is_true(context, 'use_zmq_host'):
+			actions.extend(zmq_host(context, profile))
 	return actions
+
+
+def zmq_host(context, profile):
+	"""lekiwi_zmq_host가 설치돼 있을 때만 ZMQ 호스트 노드를 켠다. 없으면 건너뛴다 (로그 한 줄).
+
+	팔로워와 달리 시스템 python으로 돈다 (lerobot을 쓰지 않는다: prefix 없음).
+	포트는 인자가 이긴다: [패키지 설정 → 장비 프로파일 → zmq_cmd_port · zmq_obs_port].
+	"""
+	try:
+		config = os.path.join(share('lekiwi_zmq_host'), 'config', 'lekiwi_zmq_host.yaml')
+	except PackageNotFoundError:
+		return [LogInfo(msg='use_zmq_host:=true but lekiwi_zmq_host is not built; skipping the ZMQ host')]
+	ports = {
+		'port_zmq_cmd': int(LaunchConfiguration('zmq_cmd_port').perform(context)),
+		'port_zmq_observations': int(LaunchConfiguration('zmq_obs_port').perform(context)),
+	}
+	return [make_node(
+		package='lekiwi_zmq_host',
+		executable='lekiwi_zmq_host_node',
+		name='lekiwi_zmq_host_node',
+		output='screen',
+		parameters=[config, profile, ports],
+	)]
 
 
 def follower_arm(context, profile):
@@ -228,6 +254,13 @@ def generate_launch_description():
 		DeclareLaunchArgument(
 			'robot_id', default_value='',
 			description='팔로워 보정 파일 이름 <robot_id>.json. 비우면 장비 프로파일 · 팔로워 설정(호스트 이름)을 쓴다'),
+		DeclareLaunchArgument(
+			'use_zmq_host', default_value='true',
+			description='lerobot LeKiwi 호스트와 같은 ZMQ 노드 (lekiwi_zmq_host, 설치돼 있을 때만). 인증 없이 같은 망 누구나 붙는다'),
+		DeclareLaunchArgument(
+			'zmq_cmd_port', default_value='5555', description='ZMQ 명령 포트 (lerobot port_zmq_cmd)'),
+		DeclareLaunchArgument(
+			'zmq_obs_port', default_value='5556', description='ZMQ 관측 포트 (lerobot port_zmq_observations)'),
 		DeclareLaunchArgument(
 			'joint_state_rate', default_value='10',
 			description='[Hz] 관절 상태 · 관절 TF 발행 주기 (화면 표시용). Pi에서 Nav2를 함께 돌리므로 낮게 둔다'),
